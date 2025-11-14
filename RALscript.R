@@ -1,5 +1,5 @@
 #2021 POPPK Model 
-
+###############################
 model <- 
   "
 $PARAM
@@ -25,11 +25,11 @@ EFV : 0   :        // efavirenz (0 = n, 1 = y)
 FED : 0  :         // fed status (0 = fast, 1 = fed)
 LOWFAT : 0 :       // low fat diet (0 = n, 1 = y)
 
-$OMEGA @name IIV @labels eta_V1 eta_CL eta_Q eta_V2
-0.3959594    // IIV_V1 (69.7% CV) 
-0.07862262    // IIV_CL (28.6% CV)  
-0.4129206    // IIV_Q (71.5% CV) 
-0.8446246    // IIV_V2 (115.2% CV)
+$OMEGA @block @name IIV @labels eta_V1 eta_CL eta_Q eta_V2
+0.3959594                                  // IIV_V1 (69.7% CV) 
+0        0.07862262                         // IIV_CL (28.6% CV) 
+0        0.03243243 0.4129206              // IIV_Q (71.5% CV) 
+0        0          0.3484313       0.8446246     // IIV_V2 (115.2% CV)
 
 $OMEGA @name IOV @labels eta_F eta_MAT
 0.8138774    // IOV_F (112.1% CV)
@@ -47,17 +47,16 @@ double V1i = V1F * (WT / 70) * exp(eta_V1);
 double Qi = QF * pow((WT / 70), 0.75) * exp(eta_Q);
 double V2i = V2F * (WT / 70) * exp(eta_V2);
 double MATi = MAT * (1 + FED * thetaMAT_FED) * exp(eta_MAT);
-double KTRi = 4 / MATi;
+double KTRi = 3 / MATi;
 double Fi = (1 * (1 + LOWFAT * thetaFLOWFAT) * (1 + PREG * thetaFPREG) * (1 + EFV * thetaFEFV)) * exp(eta_F);
 F_GUT = Fi;
 
-
 $ODE
-dxdt_GUT = -KA * GUT;
-dxdt_TRANS1 = KA * GUT - KTRi * TRANS1;
+dxdt_GUT = -KTRi * GUT;
+dxdt_TRANS1 = KTRi * GUT - KTRi * TRANS1;
 dxdt_TRANS2 = KTRi * TRANS1 - KTRi * TRANS2;
-dxdt_TRANS3 = KTRi * TRANS2 - KTRi * TRANS3;
-dxdt_CENTRAL = KTRi * TRANS3 - (CLi / V1i) * CENTRAL - (Qi / V1i) * CENTRAL + (Qi / V2i) * PERIPH;
+dxdt_TRANS3 = KTRi * TRANS2 - KA * TRANS3;
+dxdt_CENTRAL = KA * TRANS3 - (CLi / V1i) * CENTRAL - (Qi / V1i) * CENTRAL + (Qi / V2i) * PERIPH;
 dxdt_PERIPH = (Qi / V1i) * CENTRAL - (Qi / V2i) * PERIPH;
 
 $TABLE
@@ -96,12 +95,12 @@ set.seed(54612)
 EFV = tibble(ID = 1:4500) %>% 
   mutate(EFV = rbinom(n(), 1, 0.10))  # 10% usam Efavirenz
 
-# --- FED (Renomeado para 'fed_data') ---
+# --- FED ---
 set.seed(4658)
 fed_data = tibble(ID = 1:4500) %>%
   mutate(FED = rbinom(n(), 1, 0.50)) # A coluna interna ainda se chama FED
 
-# --- LOWFAT (Renomeado para 'lowfat_data' e usando 'fed_data') ---
+# --- LOWFAT ---
 set.seed(9108)
 lowfat_data <- fed_data %>% # Usar o tibble renomeado
   mutate(LOWFAT = ifelse(FED == 1, rbinom(n(), 1, 0.50), 0)) %>%
@@ -110,7 +109,7 @@ lowfat_data <- fed_data %>% # Usar o tibble renomeado
 #Dose simulation- 400 mg BID e 1200 mg QD
 
 set.seed(4040)
-dose_events <- ev(ID = 1:4500, amt = 400, ii = 12, addl = 6)
+dose_events <- ev(ID = 1:4500, amt = 400, ii = 12, addl = 10)
 dose <- as_tibble(dose_events) %>%
   select(ID, time, amt, ii, addl, evid, cmt) %>%
   mutate(dose_group = "400mg BID") %>%
@@ -132,35 +131,38 @@ set.seed(2)
 out <- mod %>%
   data_set(pac) %>%
   Req(CP, DV, CLi, V2i, KTRi, Qi, V1i, Fi, MATi) %>%
-  mrgsim(end = 72, delta = 0.5, carry_out = "OCC")
+  mrgsim(end = 120, delta = 0.5, carry_out = "OCC")
 
 simul_ral <- as_tibble(out) %>%
   left_join(pac %>%
               select(ID, OCC, dose_group, PREG, ATV, EFV, FED, WT, LOWFAT) %>% distinct(ID, OCC, .keep_all = TRUE),
             by = c("ID", "OCC"))
 
-simul_ral2 <- simul_ral %>% filter(time>59)
+simul_ral2 <- simul_ral %>% filter(time>107)
 aucs <- simul_ral2 %>%
   group_by(ID) %>%
   mutate(AUCt = trapz(time, DV))
+dataconc <- aucs %>% mutate(Group = "Bukkems et al. (2021)") %>% select(ID, time,Group, DV, AUCt)
 
-simul_ral3 <- aucs %>% filter(time==59.5 | time==61 |time==62 | time==63|time==64 | time==60.5)
+simul_ral3 <- aucs %>% filter(time==107.5 | time==109 |time==110 | time==111|time==112 | time==108.5)
 pivot_conc <- simul_ral3 %>% 
   select(ID, time, DV) %>% 
   pivot_wider(id_cols = ID, names_from = time, names_prefix = "conc_", values_from = DV)
 
 base_prediction_auc <- simul_ral3 %>% 
-  filter(time==59.5) %>% 
+  filter(time==107.5) %>% 
   select( -time, -CP) %>% left_join(pivot_conc)
 
 #Remove <1 >99 percentiles
 centile_1_auc <- quantile(base_prediction_auc$AUCt, 0.01)
 centile_99_auc <- quantile(base_prediction_auc$AUCt, 0.99)
 
+dataconc <- dataconc %>% group_by(ID) %>% 
+  filter(AUCt >= centile_1_auc, AUCt <= centile_99_auc) %>% ungroup()
 base_prediction_auc1 <- base_prediction_auc %>%
   filter(AUCt >= centile_1_auc, AUCt <= centile_99_auc)
 
-data22 <- fread("ralsim2021.csv")
+# data <- fread("ralsim2021.csv")
 # fwrite(base_prediction_auc1, file = "ralsim2021.csv")
 
 #2012 POPPK Model
@@ -194,9 +196,8 @@ $OMEGA @name IIV @labels eta_V1 eta_KA eta_F1
 0.6351811  // Variance eta_KA (94.2% CV)
 0.5605805  // Variance eta_F1 (86.7% CV)
 
-
 $SIGMA 
-0.01 //0.3074847   // residual variance (60% CV)
+0.01 // 0.3074847   // residual variance (60% CV)
 
 $PK
 // variables
@@ -238,38 +239,46 @@ $CAPTURE CP CL V1 KA F1 eta_V1 eta_KA eta_F1
 mod <- mcode("final_model", model)
 
 i=1
+#Sex
 set.seed(str_c(12,i))
 sex = tibble(ID = 1:4500) %>% 
   mutate(sex = rbinom(n(),1,0.786))
+
+#Race
 set.seed(str_c(12,3))
 race = tibble(ID = 1:4500) %>% 
   mutate(race = rbinom(n(),1,0.09))
 #https://pmc.ncbi.nlm.nih.gov/articles/PMC5377560/
+
+#HIV
 set.seed(15744)
 hiv = tibble(ID = 1:4500) %>% 
   mutate(hiv = rbinom(n(),1,0.85))
+
+#ATV
 set.seed(4442)
 atv <- hiv %>%
   mutate(atv = ifelse(hiv == 1, rbinom(n(), 1, 0.09), 0))
 set.seed(str_c(12,i))
+
+#Bilirrubin
 bilirubin = tibble(ID = 1:4000) %>% 
   mutate(bilirubin = rtruncnorm(n(),a=5, b=91, mean=12, sd=4)) %>% 
   rbind(tibble(ID = 4001:4450) %>% 
           mutate(bilirubin = rtruncnorm(n(),a=5, b=91, mean=30, sd=8))) %>% 
   rbind (tibble(ID = 4451:4500) %>% 
            mutate(bilirubin = rtruncnorm(n(),a=5, b=91, mean=70, sd=12)))
+
 #DOSE 400mg BID in both studies 800 daily
-dose <- as_tibble(ev(ID = 1:4500, amt = 400, ii = 12, addl = 5)) %>%
+dose <- as_tibble(ev(ID = 1:4500, amt = 400, ii = 12, addl = 10)) %>%
   mutate(dose_group = "400mg BID")
 pac <- left_join(sex, race) %>% left_join(bilirubin) %>% left_join(hiv) %>% left_join(atv) %>%  left_join(dose)  
-
-
 
 #model simulation
 out <- mod %>%
   data_set(pac) %>%
   Req(CP, CL, F1) %>%
-  mrgsim(end = 72, delta = 0.5)
+  mrgsim(end = 120, delta = 0.5)
 
 simul_ral <- as_tibble(out) %>% 
   left_join(pac %>% 
@@ -278,43 +287,66 @@ simul_ral <- as_tibble(out) %>%
 simul_ral <- simul_ral %>% 
   mutate(dose = parse_number(dose_group),
          auc = dose/CL)
-simul_ral2 <- simul_ral %>% filter(time>59)
+simul_ral2 <- simul_ral %>% filter(time>107)
 aucs <- simul_ral2 %>%
   group_by(ID) %>%
   mutate(AUCt = trapz(time, CP))
+dfconc <- aucs %>% mutate(Group = "Arab-Alameddine et al. (2012)") %>% rename(DV = CP) %>% select(ID, time,Group, DV, AUCt)
 
-simul_ral3 <- aucs %>% filter(time==59.5 | time==61 |time==62 | time==63|time==64 | time==60.5)
+simul_ral3 <- aucs %>% filter(time==107.5 | time==109 |time==110 | time==111|time==112 | time==108.5)
 pivot_conc <- simul_ral3 %>% 
   select(ID, time, CP) %>% 
   pivot_wider(id_cols = ID, names_from = time, names_prefix = "conc_", values_from = CP)
 
 base_prediction_auc <- simul_ral3 %>% 
-  filter(time==59.5) %>% 
+  filter(time==107.5) %>% 
   select( -time, -CP) %>% left_join(pivot_conc)
 
 #Remove <1 >99 percentiles
 centile_1_auc <- quantile(base_prediction_auc$AUCt, 0.01)
 centile_99_auc <- quantile(base_prediction_auc$AUCt, 0.99)
-
+dfconc <- dfconc %>% group_by(ID) %>% 
+  filter(AUCt >= centile_1_auc, AUCt <= centile_99_auc) %>% ungroup()
 base_prediction_auc1 <- base_prediction_auc %>%
   filter(AUCt >= centile_1_auc, AUCt <= centile_99_auc)
-
-fwrite(base_prediction_auc1, file = "ralsim2012.csv")
+#   fwrite(base_prediction_auc1, file = "ralsim2012.csv")
 
 # Parallel
 n_cores <- detectCores() - 2
 cl <- makePSOCKcluster(n_cores)
 registerDoParallel(cl)
 data <- as.data.frame(fread("ralsim2021.csv"))
-all_predictors <- c( "C0","C05", "C1", "C2", "C3", "C4")
-response <- "AUCt"
 
 data <- data %>% select(-ID,-dose_group) %>% 
-  mutate(Diff_C1C0 = conc_61 - conc_59.5) %>%
-  rename(C0 = conc_59.5, C1 = conc_61, C2 = conc_62, C3 = conc_63,
-         C4= conc_64, C05= conc_60.5) 
+  rename(C0 = conc_107.5, C1 = conc_109, C2 = conc_110, C3 = conc_111,
+         C4= conc_112, C05= conc_108.5) 
 
-# Arrange dataframes
+# Metrics
+calculate_metrics <- function(pred_df) {
+  if (nrow(pred_df) == 0) return(NULL)
+  
+  pred_df %>%
+    mutate(
+      biais_brut = .pred - AUCt,
+      bias_rel = (.pred - AUCt) / AUCt,
+      bias_rel_square = bias_rel^2,
+      biais_brut_sqr = biais_brut^2
+    ) %>%
+    summarise(
+      biais_brut = mean(biais_brut),
+      rmse = sqrt(mean(biais_brut_sqr)),
+      biais_rel = mean(bias_rel),
+      relative_rmse = sqrt(mean(bias_rel_square)),
+      biais_out_20percent = mean((bias_rel) > 0.2),
+      nb_out_20percent = sum((bias_rel) > 0.2),
+      n = n()
+    ) %>%
+    mutate(
+      R2 = summary(lm(AUCt ~ .pred, data = pred_df))$r.squared
+    )
+}
+
+#2023 data arrangement
 df <- as.data.frame(fread("moreira2023.csv"))
 df <- df %>% filter(CMT == 2)
 df$DV2 <- df$DV*444.4163/1000
@@ -322,6 +354,8 @@ df <- df %>% select(ID, TTIME, DV2, tratamento, IDD)
 df <- df %>%
   group_by(IDD) %>%
   mutate(AUCt = trapz(TTIME, DV2))
+df2conc <- df %>% mutate(Group = "Moreira et al. (2023)") %>% select(-ID) %>%
+  rename(DV = DV2, ID = IDD, time = TTIME) %>% select(ID, time,Group, DV, AUCt)
 df <- df %>% mutate(TTIME = case_when(
   TTIME == 0 ~ "C0",
   TTIME == 0.5 ~ "C05",
@@ -344,11 +378,309 @@ df2 <- df %>%
   select( -TTIME, -DV2) %>% left_join(pivot_df)
 df2 <- as.data.frame(df2)
 
-df <- as.data.frame(fread("ralsim2012.csv"))
-df <- df %>% mutate(Diff_C1C0 = conc_61 - conc_59.5) %>%
-  rename(C0 = conc_59.5, C1 = conc_61, C2 = conc_62, C3 = conc_63,
-         C4= conc_64, C05= conc_60.5)
+df <- as.data.frame(fread("ralsim20121710sigma001.csv"))
+df <- df %>% rename(C0 = conc_107.5, C1 = conc_109, C2 = conc_110, C3 = conc_111,
+                    C4= conc_112, C05= conc_108.5) 
 
+
+### Combination function
+test_combinations <- function(data, time_predictors, fixed_predictors = NULL, response,
+                              external_dfs = list(), combo_sizes = c(2, 3),
+                              include_fixed_predictors = TRUE,
+                              include_ratio_predictors = FALSE, 
+                              include_diff_predictors = FALSE,
+                              algorithms = c("rf", "xgb", "svm", "glmnet"),
+                              return_fits = FALSE,
+                              return_workflows = FALSE) {
+  
+  # Lists
+  all_results <- list()
+  all_best_params <- list()
+  all_tabs <- list()
+  all_fits <- list()
+  all_workflows <- list()
+  
+  # Control
+  ctrl <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
+  race_ctrl <- control_race(save_pred = TRUE)
+  
+  # Algorithms
+  valid_algs <- c("rf", "xgb", "svm", "glmnet")
+  algorithms <- intersect(algorithms, valid_algs)
+  
+  # Derived Predictors
+  create_derived_predictors <- function(df, predictors, 
+                                        include_ratio, include_diff) {
+    new_df <- df
+    ratio_names <- c()
+    diff_names <- c()
+    
+    if (include_ratio && length(predictors) >= 2) {
+      ratios <- combn(predictors, 2, simplify = FALSE) %>%
+        map(function(pair) {
+          name <- paste0(pair[2], "_div_", pair[1])
+          new_df <<- new_df %>%
+            mutate(!!name := ifelse(!!sym(pair[1]) == 0, NA, !!sym(pair[2]) / !!sym(pair[1])))
+          name
+        })
+      ratio_names <- unlist(ratios)
+    }
+    
+    if (include_diff && length(predictors) >= 2) {
+      diffs <- combn(predictors, 2, simplify = FALSE) %>%
+        map(function(pair) {
+          name <- paste0(pair[2], "_sub_", pair[1])
+          new_df <<- new_df %>%
+            mutate(!!name := !!sym(pair[2]) - !!sym(pair[1]))
+          name
+        })
+      diff_names <- unlist(diffs)
+    }
+    
+    list(data = new_df, ratio_names = ratio_names, diff_names = diff_names)
+  }
+  
+  # Algs specs
+  model_specs <- list(
+    rf = rand_forest(
+      mtry = tune(),
+      min_n = tune(),
+      trees = tune()
+    ) %>% 
+      set_engine("ranger", nthread = 10) %>% 
+      set_mode("regression"),
+    
+    xgb = boost_tree(
+      mode = "regression",
+      mtry = tune(),
+      trees = tune(),
+      min_n = tune(),
+      sample_size = tune(),
+      tree_depth = tune(),
+      learn_rate = tune()
+    ) %>% 
+      set_engine("xgboost", nthread = 10),
+    
+    svm = svm_linear(
+      mode = "regression",
+      cost = tune(),
+      margin = tune()
+    ) %>% 
+      set_engine("kernlab", nthread = 10),
+    
+    glmnet = linear_reg(
+      penalty = tune(),
+      mixture = tune()
+    ) %>% 
+      set_engine("glmnet", nthread = 10)
+  )
+  
+  # Combination process
+  for (n in combo_sizes) {
+    size_results <- list()
+    size_best_params <- list()
+    size_tabs <- list()
+    size_fits <- list()
+    size_workflows <- list()
+    
+    # Time combinations
+    time_combos <- combn(time_predictors, n, simplify = FALSE)
+    
+    for (combo in time_combos) {
+      # Comb names
+      combo_name <- paste(combo, collapse = "_")
+      suffix <- ""
+      
+      # Suffix
+      if (include_fixed_predictors && length(fixed_predictors) > 0) {
+        suffix <- paste0(suffix, "_fixed(", paste(fixed_predictors, collapse = "+"), ")")
+      }
+      
+      derived <- create_derived_predictors(
+        data, combo, include_ratio_predictors, include_diff_predictors
+      )
+      main_data <- derived$data
+      all_predictors <- c(combo, 
+                          if(include_fixed_predictors) fixed_predictors,
+                          derived$ratio_names, 
+                          derived$diff_names)
+      
+      # Derived predictor suffix
+      if (include_ratio_predictors && length(derived$ratio_names) > 0) {
+        suffix <- paste0(suffix, "_ratio")
+      }
+      if (include_diff_predictors && length(derived$diff_names) > 0) {
+        suffix <- paste0(suffix, "_diff")
+      }
+      
+      combo_base_name <- paste0(combo_name, suffix)
+      cat("\n--- Processando combinação:", combo_base_name, "---\n")
+      
+      # Data
+      df_subset <- main_data %>% 
+        select(all_of(c(all_predictors, response))) %>%
+        na.omit()
+      
+      # Train/Test split
+      set.seed(123)
+      split <- initial_split(df_subset, strata = !!sym(response), prop = 0.75)
+      train <- training(split)
+      test <- testing(split)
+      
+      # Recipe
+      rec <- recipe(as.formula(paste(response, "~ .")), data = train) %>% 
+      step_normalize(all_numeric_predictors()) %>%
+        step_zv(all_numeric_predictors())
+      
+      # Alg selection
+      for (alg in algorithms) {
+        alg_name <- paste0(combo_base_name,alg)
+        cat("  Algoritmo:", alg, "\n")
+        
+        tryCatch({
+          # WF
+          wf <- workflow() %>% 
+            add_recipe(rec) %>% 
+            add_model(model_specs[[alg]])
+          
+          # CV10F
+          set.seed(1234)
+          folds <- vfold_cv(train, strata = !!sym(response))
+          
+          # Tuning
+          tune_res <- tune_race_anova(
+            wf, 
+            resamples = folds, 
+            grid = 60,  
+            metrics = metric_set(rmse),
+            control = race_ctrl
+          )
+          
+          # Best hyperparameters
+          best_params <- select_best(tune_res, metric = "rmse")
+          final_wf <- finalize_workflow(wf, best_params)
+          
+          # Fit
+          final_fit <- fit(final_wf, train)
+          
+          # Save WF 
+          if (return_fits) {
+            size_fits[[alg_name]] <- final_fit
+          }
+          if (return_workflows) {
+            size_workflows[[alg_name]] <- final_wf
+          }
+          
+          # CV Metrics
+          cv_res <- fit_resamples(final_wf, folds, control = ctrl)
+          cv_preds <- collect_predictions(cv_res)
+          cv_metrics <- calculate_metrics(cv_preds) %>% 
+            mutate(val = "CV10F", Combinacao = alg_name, Algoritmo = alg)
+          
+          # Test Metrics
+          test_preds <- predict(final_fit, test) %>% bind_cols(test)
+          test_metrics <- calculate_metrics(test_preds) %>% 
+            mutate(val = "Test", Combinacao = alg_name, Algoritmo = alg)
+          
+          # External Metrics
+          external_metrics <- list()
+          for (df_name in names(external_dfs)) {
+            df <- external_dfs[[df_name]]
+            
+            # Derived predictors for external data
+            derived_ext <- create_derived_predictors(
+              df, combo, include_ratio_predictors, include_diff_predictors
+            )
+            df_ext <- derived_ext$data
+            
+            # Verify
+            missing_vars <- setdiff(all_predictors, colnames(df_ext))
+            if (length(missing_vars) > 0) {
+              warning(paste("Variáveis faltantes em", df_name, ":", paste(missing_vars, collapse = ", ")))
+              next
+            }
+            
+            preds <- predict(final_fit, df_ext) %>% 
+              bind_cols(df_ext %>% select(all_of(response)))
+            metrics <- calculate_metrics(preds) %>% 
+              mutate(val = df_name, Combinacao = alg_name, Algoritmo = alg)
+            
+            external_metrics[[df_name]] <- metrics
+          }
+          
+          # Save results
+          size_results[[alg_name]] <- cv_metrics$rmse
+          size_best_params[[alg_name]] <- best_params
+          all_metrics <- c(list(cv_metrics, test_metrics), external_metrics)
+          size_tabs[[alg_name]] <- bind_rows(all_metrics)
+          
+        }, error = function(e) {
+          message("Erro no algoritmo ", alg, " para combinação ", combo_base_name, ": ", e$message)
+        })
+      }
+    }
+    
+    all_results[[paste0("size_", n)]] <- size_results
+    all_best_params[[paste0("size_", n)]] <- size_best_params
+    all_tabs[[paste0("size_", n)]] <- bind_rows(size_tabs)
+    if (return_fits) {
+      all_fits[[paste0("size_", n)]] <- size_fits
+    }
+    if (return_workflows) {
+      all_workflows[[paste0("size_", n)]] <- size_workflows
+    }
+  }
+  
+  if (return_fits && return_workflows) {
+    return(list(
+      results = all_results,
+      best_params_list = all_best_params,
+      all_tabs = all_tabs,
+      fits = all_fits,
+      workflows = all_workflows
+    ))
+  } else if (return_fits) {
+    return(list(
+      results = all_results,
+      best_params_list = all_best_params,
+      all_tabs = all_tabs,
+      fits = all_fits
+    ))
+  } else if (return_workflows) {
+    return(list(
+      results = all_results,
+      best_params_list = all_best_params,
+      all_tabs = all_tabs,
+      workflows = all_workflows
+    ))
+  } else {
+    return(list(
+      results = all_results,
+      best_params_list = all_best_params,
+      all_tabs = all_tabs
+    ))
+  }
+}
+
+
+# Run function
+ results <- test_combinations(
+  data = data,
+  time_predictors = c("C05","C2","C4"),
+  fixed_predictors = c(),
+  response = "AUCt",
+  external_dfs = list(
+    "Fernanda" = df2
+  ),
+  combo_sizes = c(3),
+  include_fixed_predictors = F,
+  include_ratio_predictors = F,
+  include_diff_predictors = F,
+  return_fits = T,
+  return_workflows = T,
+  algorithms = c("xgb"))
+final_results <- bind_rows(results$all_tabs)
+#fwrite(final_results, file = "models.csv")
 
 final_data <- data %>% select(C05, C2, C4, AUCt)
 
@@ -384,42 +716,42 @@ final_xgb_spec <- boost_tree(mode = "regression",
                              tree_depth = tune(),
                              learn_rate = tune()) %>%
   set_engine("xgboost", nthread = 10)
+
 final_xgb_spec <- finalize_model(final_xgb_spec,results[["best_params_list"]][["size_3"]][["C05_C2_C4xgb"]])
 
 final_xgb_spec %>% set_engine("xgboost", importance = "permutation") %>%
   fit(AUCt ~ ., data = juice(ral_ml_rec_prep)) %>%
   vip::vip(geom = "col") + theme_bw() +  theme(axis.title.x = element_text(size = 20),
-                                               axis.text.x = element_text(size = 17),
-                                               axis.text.y = element_text(size = 17),
-                                               axis.title.y = element_text(size = 20),
-                                               legend.text = element_text(size = 17),
-                                               plot.title = element_text(size = 16))
+                                                axis.text.x = element_text(size = 17),
+                                                axis.text.y = element_text(size = 17),
+                                                axis.title.y = element_text(size = 20),
+                                                legend.text = element_text(size = 17),
+                                                plot.title = element_text(size = 16))
 
 final_wf <- results$workflows$size_3$C05_C2_C4xgb
 
 #Save model
 final_wf_xgb <- results$fits$size_3$C05_C2_C4xgb
-#saveRDS(final_wf_xgb, "model_xgboost2021FIM.rds")
+#saveRDS(final_wf_xgb, "model_xgboost2021.rds")
 
 explainer_external <- explain_tidymodels(
   model = final_wf_xgb, 
   data = final_train, 
   y = final_train$AUCt,
   label = "xgb")
-#saveRDS(explainer_external, file ="explainer_externalxgb2021FIM.rds" )
+#saveRDS(explainer_external, file ="explainer_externalxgb2021.rds" )
 
 # Predictions on sets
 # final_predictions <- final_wf_xgb %>% predict(final_train) %>% bind_cols(final_train)
 
 #resample
-set.seed(456)
+set.seed(1234)
 folds <- vfold_cv(final_train, strata = AUCt)
 
 #10 fold CV
 xgb_rs<- fit_resamples(object = final_wf, 
                        resamples = folds, 
                        control = control_resamples(verbose=T, save_pred = T))
-
 
 xgb_pred_obs <- xgb_rs%>% collect_predictions()
 CV10F <- calculate_metrics(xgb_pred_obs)
@@ -439,14 +771,21 @@ Figure_2a <- Train_pred_obs %>%
   labs(x="Reference AUC (mg*h/L)", y= "Predicted raltegravir AUC (mg*h/L)",
        color="", title = "A") + 
   theme_bw()+
-  theme(axis.title.x = element_text(size = 20),
-        axis.text.x = element_text(size = 17),
-        axis.text.y = element_text(size = 17),
-        axis.title.y = element_text(size = 20),
-        legend.text = element_text(size = 17),
-        plot.title = element_text(size = 16))
+  theme(axis.title.x = element_text(size = 23),
+        axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.y = element_text(size = 23),
+        legend.text = element_text(size = 18),
+        plot.title = element_text(size = 17),
+        # Adicionar bordas para melhor visualização
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        # Mover legenda para dentro do gráfico (canto superior direito)
+        legend.position = c(0.85, 0.265),
+        legend.justification = c(1, 1),
+        legend.background = element_rect(fill = "transparent")
+  )
 Figure_2a
-
 
 Figure_2c <- xgb_pred_obs%>%
   ggplot(mapping = aes(x = AUCt, y = AUCt - .pred)) +
@@ -465,9 +804,7 @@ final_res_predictions <- final_res %>% collect_predictions()
 ab <- calculate_metrics(final_res_predictions)
 ab$val <- "Test"
 
-
 Test_pred_obs <- final_res_predictions %>% left_join(ral_ml_test, by="AUCt")
-
 
 Test_pred_obs$PREG <- as.factor(Test_pred_obs$PREG)
 Test_pred_obs <- Test_pred_obs %>% mutate(PREG = case_when(
@@ -480,12 +817,18 @@ Figure_2b <- Test_pred_obs %>%
   labs(x = "Reference AUC (mg*h/L)", y = "Predicted raltegravir AUC (mg*h/L)", 
        color ="", title ="B") +  
   theme_bw() +
-  theme(axis.title.x = element_text(size = 20),
-        axis.text.x = element_text(size = 17),
-        axis.text.y = element_text(size = 17),
-        axis.title.y = element_text(size = 20),
-        legend.text = element_text(size = 17),
-        plot.title = element_text(size = 16))
+  theme(axis.title.x = element_text(size = 23),
+        axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.y = element_text(size = 23),
+        legend.text = element_text(size = 18),
+        plot.title = element_text(size = 17),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        legend.position = c(0.85, 0.265),
+        legend.justification = c(1, 1),
+        legend.background = element_rect(fill = "transparent")
+  )
 Figure_2b
 
 Figure_2d <- final_res_predictions %>%
@@ -497,13 +840,9 @@ Figure_2d <- final_res_predictions %>%
 Figure_2d
 
 #2023 External validation organizing, metrics and plots
-
-
-final_wf_xgb <- readRDS("modelo_xgboost20213concsemiovCERTO.rds")
 predictions <- predict(final_wf_xgb, new_data = df2)
 df2$AUC_pred <- predictions$.pred
 df2$.pred <- predictions$.pred
-
 
 df2 <- df2 %>% mutate(tratamento = case_when(
   tratamento == 0 ~ "Third trimester",
@@ -515,13 +854,18 @@ df2 %>%
   labs(x = "Reference AUC (mg*h/L)", y = "Predicted raltegravir AUC (mg*h/L)", 
        color="", title = "B") + 
   theme_bw()+
-  theme(axis.title.x = element_text(size = 20),
-        axis.text.x = element_text(size = 17),
-        axis.text.y = element_text(size = 17),
-        axis.title.y = element_text(size = 20),
-        legend.text = element_text(size = 17),
-        plot.title = element_text(size = 16)) 
-
+  theme(axis.title.x = element_text(size = 23),
+        axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.y = element_text(size = 23),
+        legend.text = element_text(size = 18),
+        plot.title = element_text(size = 17),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        legend.position = c(0.85, 0.265),
+        legend.justification = c(1, 1),
+        legend.background = element_rect(fill = "transparent")
+  ) 
 
 #Plots
 df2 %>%
@@ -555,12 +899,18 @@ df %>%
   labs(x = "Reference AUC (mg*h/L)", y = "Predicted raltegravir AUC (mg*h/L)", 
        color ="", title ="A") +  
   theme_bw() +
-  theme(axis.title.x = element_text(size = 20),
-        axis.text.x = element_text(size = 17),
-        axis.text.y = element_text(size = 17),
-        axis.title.y = element_text(size = 20),
-        legend.text = element_text(size = 17),
-        plot.title = element_text(size = 16))
+  theme(axis.title.x = element_text(size = 23),
+        axis.text.x = element_text(size = 18),
+        axis.text.y = element_text(size = 18),
+        axis.title.y = element_text(size = 23),
+        legend.text = element_text(size = 18),
+        plot.title = element_text(size = 17),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        legend.position = c(0.85, 0.265),
+        legend.justification = c(1, 1),
+        legend.background = element_rect(fill = "transparent")
+  )
 
 df %>%
   ggplot(mapping = aes(x = AUCt, y = AUCt - AUC_pred)) +
@@ -577,9 +927,26 @@ datagraf <- data %>% select(LOWFAT,PREG,ATV,EFV,FED,WT,AUCt,C05,C2,C4)
 datagraf <- datagraf %>%
   mutate(across(c(LOWFAT,PREG, ATV, EFV, FED), as.factor))
 
+#table
+ral_ml_train  <- training(ral_split)
 
+table1 <- CreateTableOne(vars = c("C0", "C05","C1","C2","C3","C4","AUCt", "WT","PREG", "ATV","EFV","FED","LOWFAT"), factorVars = c("PREG", "ATV","EFV","FED","LOWFAT") ,
+                          data = ral_ml_train)
+
+tableOne2b<-print(table1, nonnormal = c("C0", "C05","C1","C2","C3","C4","AUCt", "WT"), printToggle=F, minMax=F)
+
+kableone(tableOne2b)
+
+ral_ml_train  <- training(ral_split)
+
+table1 <- CreateTableOne(factorVars = c("atv", "sex") ,
+                         data = df)
+
+tableOne2b<-print(table1, nonnormal = c("C0", "C05","C1","C2","C3","C4","AUCt", "WT"), printToggle=F, minMax=F)
+tab1 <- tab %>% select(val,rmse,R2,biais_rel,relative_rmse, biais_out_20percent,nb_out_20percent)
+kableone(tableOne2b)
 # Id numeric and binary variables
-bin_vars <- c("PREG", "ATV", "EFV", "FED", "LOWFAT")  #  bináry
+bin_vars <- c("PREG", "ATV", "EFV", "FED", "LOWFAT")  #  binary
 num_vars <- c("WT", "AUCt", "C05", "C2", "C4")  # numeric
 
 # ggpairs customization
@@ -595,7 +962,7 @@ custom_plot <- function(data, mapping, ...) {
       ggplot(aes(x = !!sym(x_name), y = n, fill = as.factor(!!sym(y_name)))) +
       geom_col(position = "dodge") +
       scale_fill_brewer(palette = "Set1") +
-      theme_minimal() +
+      theme_bw() +
       labs(fill = y_name)
   } else {
     ggplot(data, mapping) + geom_point(alpha = 0.5) + geom_smooth(method = "lm", se = FALSE)
@@ -610,7 +977,6 @@ p1 <- ggpairs(datagraf,
 
 print(p1)
 
-
 ##Correlation Ctrough AUC
 
 lm <- lm((df2$AUCt) ~ (df2$C0))
@@ -619,37 +985,37 @@ lm <- lm((data$AUCt) ~ (data$C0))
 summary(lm)
 
 ggplot(data, aes(x = `C0`, y = `AUCt`)) +
-  geom_point() +
-  geom_smooth(method = "lm", col = "black", se=T) +
+  geom_point(size = 1.5) +
+  geom_smooth(method = "lm", col = "black", se=T, linewidth = 1.5) +
   scale_x_continuous(expand = c(0,0)) +
   scale_y_continuous(expand = c(0,0)) +
-  labs(title = "A   R² = 0.39, P < 0.01" ,
+  labs(title = "A   R² = 0.36, P < 0.01" ,
        x = expression(C["trough"] * " " * (mg/L)),
        y = expression(AUC["0-12"] * " " * (mg.h/L)
        )) +
-  theme_classic(base_size = 22)
+  theme_bw(base_size = 22)
 
 ggplot(df, aes(x = `C0`, y = `AUCt`)) +
-  geom_point() +
-  geom_smooth(method = "lm", col = "black", se=T) +
+  geom_point(size = 1.5) +
+  geom_smooth(method = "lm", col = "black", se=T, linewidth = 1.5) +
   scale_x_continuous(expand = c(0,0)) +
   scale_y_continuous(expand = c(0,0)) +
-  labs(title = "B   R² = 0.54, P < 0.01" ,
+  labs(title = "B   R² = 0.55, P < 0.01" ,
        x = expression(C["trough"] * " " * (mg/L)),
        y = expression(AUC["0-12"] * " " * (mg.h/L)
        )) +
-  theme_classic(base_size = 22)
+  theme_bw(base_size = 22)
 
 ggplot(df2, aes(x = `C0`, y = `AUCt`)) +
-  geom_point() +
-  geom_smooth(method = "lm", col = "black", se=T) +
-  scale_x_continuous(expand = c(0,0)) +
-  scale_y_continuous(expand = c(0,0)) +
-  labs(title = "C   R² = -0.03, P > 0.05" ,
+  geom_point(size = 1.5) +
+  geom_smooth(method = "lm", col = "black", se=T, linewidth = 1.5) +
+  scale_x_continuous(expand = c(0,0), limits = c(0,3)) +
+  scale_y_continuous(expand = c(0,0), limits = c(0,21), breaks = c(0,5,10,15,20)) +
+  labs(title = "C   R² = -0.04, P > 0.05" ,
        x = expression(C["trough"] * " " * (mg/L)),
        y = expression(AUC["0-12"] * " " * (mg.h/L)
        )) +
-  theme_classic(base_size = 22)
+  theme_bw(base_size = 22)
 
 # Data distribution
 statcal <- function(df, col_test, col_group, method = "median") {
@@ -690,18 +1056,18 @@ ral_ml_test$group <- 1
 # Results
 
 resultsstat2012 <- statcal(df, col_test = c("C0", "C05", "C1", "C2", "C3", "C4", "AUCt"),
-                           col_group = c("group"), method = "median")
+                                                col_group = c("group"), method = "median") %>% t()
 resultsstattest <- statcal(ral_ml_test, col_test = c("C0","C05","C1", "C2","C3","C4", "AUCt"),
-                           col_group = c("group"), method = "median")
+                                                col_group = c("group"), method = "median") %>% t()
 resultsstattrain <- statcal(ral_ml_train, col_test = c("C0","C05","C1", "C2","C3","C4", "AUCt"),
-                            col_group = c("group"), method = "median")
+                           col_group = c("group"), method = "median") %>% t()
 resultsstat2023 <- statcal(df2, col_test = c("C0", "C05", "C1", "C2", "C3", "C4", "AUCt"),
-                           col_group = c("group"), method = "median")
+                           col_group = c("group"), method = "median") %>% t()
 resusltsstatss <- rbind(resultsstattrain,resultsstattest,resultsstat2023,resultsstat2012)
 
 # Feature selection
 
-data <- as.data.frame(fread("ralsim2021.csv"))
+data <- as.data.frame(fread("ralsim2021FINAL.csv"))
 response <- "AUCt"
 data <- data %>% select(-ID,-dose_group) %>% 
   mutate(Diff_C1C0 = conc_61 - conc_59.5, ratioc0c1 = conc_61/conc_59.5) %>% 
@@ -785,3 +1151,94 @@ vip(glm_net)
 
 boruta_model <- Boruta(AUCt ~ ., data = final_data, doTrace = 2)
 stats_boruta <- attStats(boruta_model)
+
+# Cattaneo external validation
+
+df2$.pred <- 2.082*df2$C0 + 0.821*df2$C1 + 1.238*df2$C2 - 0.210*df2$C3 + 4.280*df2$C4 + 0.7831
+data$.pred <- 2.082*data$C0 + 0.821*data$C1 + 1.238*data$C2 - 0.210*data$C3 + 4.280*data$C4 + 0.7831
+df$.pred <- 2.082*df$C0 + 0.821*df$C1 + 1.238*df$C2 - 0.210*df$C3 + 4.280*df$C4 + 0.7831
+aa1 <- calculate_metrics(data)
+aa2 <-calculate_metrics(df)
+aa3 <-calculate_metrics(df2)
+aa4 <- rbind(aa1,aa2,aa3)
+
+data$.pred <-0.876*data$C1 + 1.201*data$C2 + 3.994*data$C4 + 1.8242 
+df$.pred<- 0.876*df$C1 + 1.201*df$C2 + 3.994*df$C4 + 1.8242 
+df2$.pred<- 0.876*df2$C1 + 1.201*df2$C2 + 3.994*df2$C4 + 1.8242 
+aa1 <- calculate_metrics(data)
+aa2 <-calculate_metrics(df)
+aa3 <-calculate_metrics(df2)
+aa4 <- rbind(aa1,aa2,aa3)
+
+data$.pred <- 2.289*data$C0 + 1.5153*data$C2 + 4.026*data$C4 + 1.5881
+df$.pred<- 2.289*df$C0 + 1.5153*df$C2 + 4.026*df$C4 + 1.5881
+df2$.pred<- 2.289*df2$C0 + 1.5153*df2$C2 + 4.026*df2$C4 + 1.5881
+aa1 <- calculate_metrics(data)
+aa2 <-calculate_metrics(df)
+aa3 <-calculate_metrics(df2)
+aa4 <- rbind(aa1,aa2,aa3)
+
+#Typical concentration-time curves for each dataset
+concss <- rbind(dataconc,dfconc,df2conc) 
+concss <- concss %>% ungroup %>%  mutate(time = case_when(
+  time == 107.5 ~ 0,
+  time == 108.5 ~ 0.5,
+  time == 109 ~ 1,
+  time == 110 ~ 2,
+  time == 111 ~ 3,
+  time == 112 ~ 4,
+  time == 114 ~ 6,
+  time == 116 ~ 8,
+  time == 120 ~ 12,
+  TRUE ~ time)) %>% filter(time %in% c(0,0.5,1,2,3,4,6,8,12))
+  concs <- concss %>% 
+    group_by(ID, time, Group) %>% 
+    slice_max(DV, n = 1, with_ties = TRUE) %>% ungroup() %>% pivot_wider(id_cols = c("ID","Group"), names_from = time, values_from = DV)
+  
+  concs <- concss %>% 
+    group_by(ID, time, Group) %>% 
+    slice_max(DV, n = 1, with_ties = TRUE) %>% ungroup() 
+    
+  concs1 <- concs %>% 
+    group_by(time, Group) %>% 
+    summarise(
+      median_DV = median(DV, na.rm = TRUE),
+      Q1 = quantile(DV, 0.25, na.rm = TRUE),  
+      Q3 = quantile(DV, 0.75, na.rm = TRUE),  
+      IQR = IQR(DV, na.rm = TRUE),            
+      n = n(),                                 
+      .groups = 'drop'  
+    )
+  
+  concs1 %>% 
+    ggplot(mapping = aes(x = time, y = median_DV, colour = Group)) + 
+    geom_point(position = position_dodge(width = 0.2), size = 3) +
+    geom_line(position = position_dodge(width = 0.2), linewidth = 1.2) +
+    geom_errorbar(
+      aes(ymin = Q1, ymax = Q3), 
+      position = position_dodge(width = 0.2), 
+      width = 0.3,
+      size = 0.8
+    ) +
+    scale_y_log10(breaks = c(0.01, 0.1, 1), limits = c(0.008,2.5)) +
+    labs(
+      x = "Time (h)", 
+      y = "Plasma concentration (mg/L)",
+      color = ""
+    ) + 
+    theme_bw() +
+    theme(
+      axis.title.x = element_text(size = 20),
+      axis.text.x = element_text(size = 17),
+      axis.text.y = element_text(size = 17),
+      axis.title.y = element_text(size = 20),
+      legend.text = element_text(size = 17),
+      plot.title = element_text(size = 16),
+        panel.grid.major = element_line(color = "gray90", size = 0.2),
+        panel.grid.minor = element_line(color = "gray95", size = 0.1),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      legend.position = c(0.6, 0.4),
+      legend.justification = c(1, 1),
+      legend.background = element_rect(fill = "transparent")
+      )
