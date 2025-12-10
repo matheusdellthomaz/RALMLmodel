@@ -2,8 +2,8 @@
 Here you can find the R scripts, RDS files, csv datasets, used in raltegravir (RAL) exposure prediction using machine learning (ML).
 
 Test_combination is the script used for testing different ML algorithms, combination sizes, concentrations at different times, inclusion of covariates and derived predictors from concentrations, developed for predicting RAL AUC from 3 samples.
-mapbayaugcomb is the script used for the MAP-BE methodology
 In this script the algorithms available are xgboost, glm, rf, and svm.
+Mapbayaugcomb is the script used for the MAP-BE methodology
 
 RALscript contains the POPPK models implementation, PK profiles and patients simulation, datasets management, plots, metrics and initial feature selection
 
