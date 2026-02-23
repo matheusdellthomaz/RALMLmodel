@@ -11,4 +11,6 @@ The RDS file named "model_xgboost2021FIM.rds" is the RDS file of the xgboost mod
 The RDS can be loaded directly to get predictions from other datasets run the script and get the RAL AUC predictions.
 
 The CSV file named "ralsim2021.csv" is the simulated patients dataset used for training the ML models.
-The CSV files named "ralsim2012.csv" and "moreira2023.csv" are the datasets, simulated and real world patients, repectivelly, used for the external validation of the ML models.
+The CSV files named "ralsim2012.csv" is the dataset, for the simulated patients, used for the external validation of the ML models.
+
+The CSV files named "models12hrspairs.csv" and "models12hrstriplets.csv" are the datasets containing the metrics for all the ML algorithms and all sample time combinations of pair and triplets, repectivelly.
