@@ -60,7 +60,7 @@ dxdt_CENTRAL = KA * TRANS3 - (CLi / V1i) * CENTRAL - (Qi / V1i) * CENTRAL + (Qi 
 dxdt_PERIPH = (Qi / V1i) * CENTRAL - (Qi / V2i) * PERIPH;
 
 $TABLE
-double CP = CENTRAL / V1i; // Concentração plasmática;
+double CP = CENTRAL / V1i;
 double TIME_REL = fmod(TIME, 12); //  12 hour cycle
 double DV;
 
@@ -83,26 +83,26 @@ WT = tibble(ID = 1:4500) %>%
 # PREG (0 = no, 1 = yes)
 set.seed(4231)
 PREG = tibble(ID = 1:4500) %>% 
-  mutate(PREG = rbinom(n(), 1, 0.4))  # 15% das mulheres são grávidas
+  mutate(PREG = rbinom(n(), 1, 0.4))  
 
 # Atazanavir (ATV)
 set.seed(7984)
 ATV = tibble(ID = 1:4500) %>% 
-  mutate(ATV = rbinom(n(), 1, 0.10))  # 10% usam Atazanavir
+  mutate(ATV = rbinom(n(), 1, 0.10))  
 
 # Efavirenz (EFV)
 set.seed(54612)
 EFV = tibble(ID = 1:4500) %>% 
-  mutate(EFV = rbinom(n(), 1, 0.10))  # 10% usam Efavirenz
+  mutate(EFV = rbinom(n(), 1, 0.10))  
 
 # --- FED ---
 set.seed(4658)
 fed_data = tibble(ID = 1:4500) %>%
-  mutate(FED = rbinom(n(), 1, 0.50)) # A coluna interna ainda se chama FED
+  mutate(FED = rbinom(n(), 1, 0.50)) 
 
 # --- LOWFAT ---
 set.seed(9108)
-lowfat_data <- fed_data %>% # Usar o tibble renomeado
+lowfat_data <- fed_data %>% 
   mutate(LOWFAT = ifelse(FED == 1, rbinom(n(), 1, 0.50), 0)) %>%
   select(ID, LOWFAT)
 
@@ -125,7 +125,7 @@ pac <- left_join(WT, PREG, by = "ID") %>%
   left_join(lowfat_data, by = "ID") %>%
   left_join(dose, by = "ID")
 
-#model simulation
+# Model simulation
 set.seed(2)
 
 out <- mod %>%
@@ -1242,3 +1242,4 @@ concss <- concss %>% ungroup %>%  mutate(time = case_when(
       legend.justification = c(1, 1),
       legend.background = element_rect(fill = "transparent")
       )
+
