@@ -6,17 +6,17 @@ calculate_metrics <- function(pred_df) {
   
   pred_df %>%
     mutate(
-      biais_brut = .pred - AUCt,
+      bias_brut = .pred - AUCt,
       bias_rel = (.pred - AUCt) / AUCt,
       bias_rel_square = bias_rel^2,
-      biais_brut_sqr = biais_brut^2
+      bias_brut_sqr = bias_brut^2
     ) %>%
     summarise(
-      biais_brut = mean(biais_brut),
-      rmse = sqrt(mean(biais_brut_sqr)),
-      biais_rel = mean(bias_rel),
+      bias_brut = mean(bias_brut),
+      rmse = sqrt(mean(bias_brut_sqr)),
+      bias_rel = mean(bias_rel),
       relative_rmse = sqrt(mean(bias_rel_square)),
-      biais_out_20percent = mean((bias_rel) > 0.2),
+      bias_out_20percent = mean((bias_rel) > 0.2),
       nb_out_20percent = sum((bias_rel) > 0.2),
       n = n()
     ) %>%
@@ -301,3 +301,4 @@ test_combinations <- function(data, time_predictors, fixed_predictors = NULL, re
     ))
   }
 }
+
